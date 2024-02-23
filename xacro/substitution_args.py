@@ -41,7 +41,6 @@ import math
 import os
 import yaml
 
-from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from io import StringIO
 
 
@@ -137,8 +136,45 @@ def _dirname(resolved, a, args, context):
     return resolved.replace('$(%s)' % a, _eval_dirname(context.get('filename', None)))
 
 
+class PackageFinder:
+    def __init__(self):
+        self.finder_funcs = []
+
+        # ament (ROS 2)
+        try:
+            from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
+            self.finder_funcs.append((get_package_share_directory, PackageNotFoundError))
+        except ImportError:
+            pass
+
+        # rospkg (ROS 1)
+        try:
+            import rospkg
+            rospack = rospkg.RosPack()
+            self.finder_funcs.append((rospack.get_path, rospkg.common.ResourceNotFound))
+        except ImportError:
+            pass
+
+    def look_in_paths(self, paths):
+        import rospkg
+        rospack = rospkg.RosPack(ros_paths=paths)
+        self.finder_funcs.append((rospack.get_path, rospkg.common.ResourceNotFound))
+
+    def get_path(self, pkg):
+        for func, err in self.finder_funcs:
+            try:
+                return func(pkg)
+            except err:
+                continue
+
+        raise ValueError(f"Could not find package {pkg}.")
+
+
+finder = PackageFinder()
+
+
 def _eval_find(pkg):
-    return get_package_share_directory(pkg)
+    return finder.get_path(pkg)
 
 
 def _find(resolved, a, args, context):
